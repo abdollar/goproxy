@@ -404,6 +404,7 @@ func TLSConfigFromCA(ca *tls.Certificate) func(host string, ctx *ProxyCtx) (*tls
 			"*.google.com",
 			"*.amazonaws.com",
 			"s3.amazonaws.com",
+			"*.s3.amazonaws.com",
 			"*.*.s3.amazonaws.com",
 			"*.coupahost.com",
 			"*.coupadev.com",
