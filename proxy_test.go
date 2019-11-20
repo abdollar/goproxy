@@ -3,9 +3,13 @@ package goproxy_test
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"fmt"
+	"github.com/elazarl/goproxy"
+	goproxy_image "github.com/elazarl/goproxy/ext/image"
 	"image"
 	"io"
 	"io/ioutil"
@@ -15,11 +19,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/elazarl/goproxy"
-	"github.com/elazarl/goproxy/ext/image"
+	"time"
 )
 
 var acceptAllCerts = &tls.Config{InsecureSkipVerify: true}
@@ -766,6 +769,90 @@ func TestHasGoproxyCA(t *testing.T) {
 	}
 }
 
+type TestCertStorage struct {
+	certs  map[string]*tls.Certificate
+	hits   int
+	misses int
+}
+
+func (tcs *TestCertStorage) Fetch(hostname string, gen func() (*tls.Certificate, error)) (*tls.Certificate, error) {
+	var cert *tls.Certificate
+	var err error
+	cert, ok := tcs.certs[hostname]
+	if ok {
+		fmt.Printf("hit %v\n", cert == nil)
+		tcs.hits++
+	} else {
+		cert, err = gen()
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("miss %v\n", cert == nil)
+		tcs.certs[hostname] = cert
+		tcs.misses++
+	}
+	return cert, err
+}
+
+func (tcs *TestCertStorage) statHits() int {
+	return tcs.hits
+}
+
+func (tcs *TestCertStorage) statMisses() int {
+	return tcs.misses
+}
+
+func newTestCertStorage() *TestCertStorage {
+	tcs := &TestCertStorage{}
+	tcs.certs = make(map[string]*tls.Certificate)
+
+	return tcs
+}
+
+func TestProxyWithCertStorage(t *testing.T) {
+	tcs := newTestCertStorage()
+	t.Logf("TestProxyWithCertStorage started")
+	proxy := goproxy.NewProxyHttpServer()
+	proxy.CertStore = tcs
+	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
+	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		req.URL.Path = "/bobo"
+		return req, nil
+	})
+
+	s := httptest.NewServer(proxy)
+
+	proxyUrl, _ := url.Parse(s.URL)
+	goproxyCA := x509.NewCertPool()
+	goproxyCA.AddCert(goproxy.GoproxyCa.Leaf)
+
+	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: goproxyCA}, Proxy: http.ProxyURL(proxyUrl)}
+	client := &http.Client{Transport: tr}
+
+	if resp := string(getOrFail(https.URL+"/bobo", client, t)); resp != "bobo" {
+		t.Error("Wrong response when mitm", resp, "expected bobo")
+	}
+
+	if tcs.statHits() != 0 {
+		t.Fatalf("Expected 0 cache hits, got %d", tcs.statHits())
+	}
+	if tcs.statMisses() != 1 {
+		t.Fatalf("Expected 1 cache miss, got %d", tcs.statMisses())
+	}
+
+	// Another round - this time the certificate can be loaded
+	if resp := string(getOrFail(https.URL+"/bobo", client, t)); resp != "bobo" {
+		t.Error("Wrong response when mitm", resp, "expected bobo")
+	}
+
+	if tcs.statHits() != 1 {
+		t.Fatalf("Expected 1 cache hit, got %d", tcs.statHits())
+	}
+	if tcs.statMisses() != 1 {
+		t.Fatalf("Expected 1 cache miss, got %d", tcs.statMisses())
+	}
+}
+
 func TestHttpsMitmURLRewrite(t *testing.T) {
 	scheme := "https"
 
@@ -833,4 +920,53 @@ func TestHttpsMitmURLRewrite(t *testing.T) {
 			t.Errorf("Expected status: %d, got: %d", http.StatusAccepted, resp.StatusCode)
 		}
 	}
+}
+
+func returnNil(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+	return nil
+}
+
+func TestSimpleHttpRequest(t *testing.T) {
+	proxy := goproxy.NewProxyHttpServer()
+
+	var server *http.Server
+	go func() {
+		fmt.Println("serving end proxy server at localhost:5000")
+		server = &http.Server{
+			Addr:    "localhost:5000",
+			Handler: proxy,
+		}
+		err := server.ListenAndServe()
+		if err == nil {
+			t.Error("Error shutdown should always return error", err)
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+	u, _ := url.Parse("http://localhost:5000")
+	tr := &http.Transport{
+		Proxy: http.ProxyURL(u),
+		// Disable HTTP/2.
+		TLSNextProto: make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
+	}
+	client := http.Client{Transport: tr}
+
+	resp, err := client.Get("http://google.de")
+	if err != nil || resp.StatusCode != 200 {
+		t.Error("Error while requesting google with http", err)
+	}
+	resp, err = client.Get("http://google20012312031.de")
+	fmt.Println(resp)
+	if resp == nil {
+		t.Error("Error while requesting random string with http", resp)
+	}
+	proxy.OnResponse(goproxy.UrlMatches(regexp.MustCompile(".*"))).DoFunc(returnNil)
+
+	resp, err = client.Get("http://google20012312031.de")
+	fmt.Println(resp)
+	if resp == nil {
+		t.Error("Error while requesting random string with http", resp)
+	}
+
+	server.Shutdown(context.TODO())
 }
