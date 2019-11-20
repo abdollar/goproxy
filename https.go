@@ -413,9 +413,6 @@ func (proxy *ProxyHttpServer) NewConnectDialToProxyWithHandler(https_proxy strin
 
 func TLSConfigFromCA(ca *tls.Certificate) func(host string, ctx *ProxyCtx) (*tls.Config, error) {
 	return func(host string, ctx *ProxyCtx) (*tls.Config, error) {
-		var err error
-		var cert *tls.Certificate
-
 		hostname := stripPort(host)
 		config := *defaultTLSConfig
 
@@ -429,14 +426,14 @@ func TLSConfigFromCA(ca *tls.Certificate) func(host string, ctx *ProxyCtx) (*tls
 			"*.coupahost.com",
 			"*.coupadev.com",
 		}
-		ctx.Logf("signing for host:%s as hosts:%s", host, hosts)
+		ctx.Logf("signing for host:%s as hosts:%s", hostname, hosts)
 		for _, host := range hosts {
 			cert, err := signHost(*ca, []string{host})
 			if err != nil {
 				ctx.Warnf("Cannot sign host certificate with provided CA: %s", err)
 				return nil, err
 			}
-			config.Certificates = append(config.Certificates, cert)
+			config.Certificates = append(config.Certificates, *cert)
 		}
 		config.BuildNameToCertificate()
 
