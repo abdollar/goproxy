@@ -2,10 +2,15 @@ package goproxy
 
 import (
 	"bufio"
+	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptrace"
+	"net/http/httputil"
+	"net/textproto"
 	"os"
 	"regexp"
 	"sync/atomic"
@@ -117,14 +122,75 @@ func (proxy *ProxyHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 				ctx.Logf("Request looks like websocket upgrade.")
 				proxy.serveWebsocket(ctx, w, r)
 			}
-
 			removeProxyHeaders(ctx, r)
+			trace := &httptrace.ClientTrace{
+				GetConn: func(hostPort string) {
+					ctx.Logf("ClientTrace.GetConn:" + hostPort)
+				},
+				GotConn: func(connInfo httptrace.GotConnInfo) {
+					ctx.Logf(fmt.Sprintf("ClientTrace.GotConn local-address:%v", connInfo.Conn.LocalAddr()))
+					ctx.Logf(fmt.Sprintf("ClientTrace.GotConn remote-address:%v", connInfo.Conn.RemoteAddr()))
+					ctx.Logf(fmt.Sprintf("ClientTrace.GotConn conn:%v", connInfo))
+				},
+				PutIdleConn: func(err error) {
+					ctx.Logf("ClientTrace.PutIdleConn error:" + err.Error())
+				},
+				GotFirstResponseByte: func() {
+					ctx.Logf("ClientTrace.GotFirstResponseByte")
+				},
+				Got100Continue: func() {
+					ctx.Logf("ClientTrace.Got100Continue")
+				},
+				Got1xxResponse: func(code int, header textproto.MIMEHeader) error {
+					ctx.Logf(fmt.Sprintf("ClientTrace.Got1xxResponse %d %v", code, header))
+					return nil
+				},
+				DNSStart: func(dnsInfo httptrace.DNSStartInfo) {
+					ctx.Logf("ClientTrace.DNSStart %v", dnsInfo)
+				},
+				DNSDone: func(dnsInfo httptrace.DNSDoneInfo) {
+					ctx.Logf("ClientTrace.DNSDone %v", dnsInfo)
+				},
+				ConnectStart: func(network, addr string) {
+					ctx.Logf("ClientTrace.ConnectStart network:%v add:%s", network, addr)
+				},
+				ConnectDone: func(network, addr string, err error) {
+					ctx.Logf("ClientTrace.ConnectDone network:%v addr:%s err:%s", network, addr, err)
+				},
+				TLSHandshakeStart: func() {
+					ctx.Logf("ClientTrace.TLSHandshakeStart")
+				},
+				TLSHandshakeDone: func(cs tls.ConnectionState, err error) {
+					ctx.Logf("ClientTrace.TLSHandshakeDone cs:%v err:%s", cs, err)
+				},
+				WroteHeaderField: func(key string, value []string) {
+					ctx.Logf("ClientTrace.WroteHeaderField key:%s value:%v", key, value)
+				},
+				WroteHeaders: func() {
+					ctx.Logf("ClientTrace.WroteHeaders")
+				},
+				Wait100Continue: func() {
+					ctx.Logf("ClientTrace.Wait100Continue")
+				},
+				WroteRequest: func(reqInfo httptrace.WroteRequestInfo) {
+					ctx.Logf("ClientTrace.WroteRequest err:%s", reqInfo.Err)
+				},
+			}
+			r = r.WithContext(httptrace.WithClientTrace(r.Context(), trace))
+			requestDump, _ := httputil.DumpRequest(r, true)
+			ctx.Logf("--------request dump-----------")
+			ctx.Logf(string(requestDump))
+			ctx.Logf("--------request dump-----------")
 			resp, err = ctx.RoundTrip(r)
 			if err != nil {
+				ctx.Logf("RoundTrip error" + err.Error())
 				ctx.Error = err
 				resp = proxy.filterResponse(nil, ctx)
-
 			}
+			responseDump, _ := httputil.DumpResponse(resp, true)
+			ctx.Logf("--------response dump-----------")
+			ctx.Logf(string(responseDump))
+			ctx.Logf("--------response dump-----------")
 			if resp != nil {
 				ctx.Logf("Received response %v", resp.Status)
 			}
