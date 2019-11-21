@@ -281,6 +281,8 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 						},
 					}
 					req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+					b, _ := ioutil.ReadAll(req.Body)
+					ctx.Logf("body length:%d", len(b))
 					requestDump, _ := httputil.DumpRequest(req, true)
 					ctx.Logf("--------request dump-----------")
 					ctx.Logf(string(requestDump))
