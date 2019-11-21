@@ -133,7 +133,11 @@ func (proxy *ProxyHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 					ctx.Logf(fmt.Sprintf("ClientTrace.GotConn conn:%v", connInfo))
 				},
 				PutIdleConn: func(err error) {
-					ctx.Logf("ClientTrace.PutIdleConn error:" + err.Error())
+					if err != nil {
+						ctx.Logf("ClientTrace.PutIdleConn error:" + err.Error())
+					} else {
+						ctx.Logf("ClientTrace.PutIdleConn")
+					}
 				},
 				GotFirstResponseByte: func() {
 					ctx.Logf("ClientTrace.GotFirstResponseByte")
