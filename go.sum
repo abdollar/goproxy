@@ -1,0 +1,3 @@
+github.com/abdollar/goproxy/ext v0.0.0-20191121184836-333942bfa4ea h1:tLtZkdiQ8jzojXTcbB6WC8Nm9YyaAW39VDKFDiEC33k=
+github.com/abdollar/goproxy/ext v0.0.0-20191121184836-333942bfa4ea/go.mod h1:saUjLbXbWk5bWlDXDX7kXpWJR2oygtHQj7OeXsQFlKk=
+github.com/rogpeppe/go-charset v0.0.0-20180617210344-2471d30d28b4/go.mod h1:qgYeAmZ5ZIpBWTGllZSQnw97Dj+woV0toclVaRGI8pc=
